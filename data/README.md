@@ -1,137 +1,261 @@
-# Synthetic Data Generation for Workshop
+# Data Setup
 
-This folder contains scripts and source documents to generate all the data required for the QSIC workshop. It produces two types of data in Unity Catalog:
+> **This is the first step for all workshop levels.** Complete this setup before starting any workshop (Simple, Medium, or Advanced).
 
-1. **Structured retail data** — synthetic customers, products, stores, transactions, and payments
-2. **Chunked policy documents** — markdown policy docs split into overlapping text chunks for vector search
+This creates the shared dataset that all workshop levels depend on: retail data tables, chunked policy documents, a Vector Search index, a Genie Space, and an MLflow experiment.
 
-## Folder Structure
+---
+
+## Choose Your Path
+
+| Path | Best for | Time |
+|------|----------|------|
+| **[Path A: Local CLI](#path-a-local-cli)** | Local development, running the advanced workshop locally | ~15 min |
+| **[Path B: Workspace Notebook](#path-b-workspace-notebook)** | Everything inside Databricks, no local tools needed | ~15 min |
+
+Both paths produce the exact same result. Pick one.
+
+---
+
+## Path A: Local CLI
+
+Run these scripts from your local machine. They connect to your Databricks workspace via the CLI.
+
+### Prerequisites
+
+| Tool | Install |
+|------|---------|
+| Databricks CLI | `brew tap databricks/tap && brew install databricks` |
+| Python 3.9+ | [python.org](https://www.python.org/downloads/) |
+| jq | `brew install jq` |
+
+You also need:
+- A **running SQL warehouse** (Compute > SQL Warehouses in Databricks)
+- **Unity Catalog** access (permission to create tables)
+
+### Step 1: Authenticate
+
+```bash
+databricks auth login --profile DEFAULT
+```
+
+Follow the browser prompts. Verify it worked:
+
+```bash
+databricks current-user me --profile DEFAULT
+```
+
+### Step 2: Find your warehouse ID
+
+```bash
+databricks warehouses list --profile DEFAULT --output json | jq -r '.[] | "\(.id)  \(.name)  \(.state)"'
+```
+
+Pick a warehouse that shows `RUNNING`. Copy its ID.
+
+### Step 3: Create catalog and schema
+
+Run in the Databricks SQL Editor, or via CLI:
+
+```bash
+databricks api post /api/2.0/sql/statements \
+  --profile DEFAULT \
+  --json '{
+    "warehouse_id": "<WAREHOUSE-ID>",
+    "statement": "CREATE CATALOG IF NOT EXISTS <CATALOG>; CREATE SCHEMA IF NOT EXISTS <CATALOG>.<SCHEMA>;"
+  }'
+```
+
+Replace `<CATALOG>` and `<SCHEMA>` with your chosen names (e.g., `my_catalog` and `retail_agent`).
+
+### Step 4: Generate retail data tables
+
+From the repository root:
+
+```bash
+python data/local_cli_setup_script/execute_sql.py \
+  --profile DEFAULT \
+  --warehouse-id <WAREHOUSE-ID> \
+  --catalog <CATALOG> \
+  --schema <SCHEMA>
+```
+
+This creates 6 tables: `customers`, `products`, `stores`, `transactions`, `transaction_items`, `payment_history`.
+
+### Step 5: Generate policy document chunks
+
+```bash
+python data/local_cli_setup_script/execute_chunking.py \
+  --profile DEFAULT \
+  --warehouse-id <WAREHOUSE-ID> \
+  --catalog <CATALOG> \
+  --schema <SCHEMA>
+```
+
+This chunks 7 policy documents into the `policy_docs_chunked` table for Vector Search.
+
+### Step 6: Create Vector Search index + Genie Space
+
+```bash
+python data/local_cli_setup_script/create_resources.py \
+  --profile DEFAULT \
+  --warehouse-id <WAREHOUSE-ID> \
+  --catalog <CATALOG> \
+  --schema <SCHEMA>
+```
+
+This takes 5-10 minutes (Vector Search endpoint provisioning). When done, it prints:
+
+```
+============================================================
+SUMMARY
+============================================================
+  Vector Search Endpoint: <endpoint-name>
+  Vector Search Index:    <CATALOG>.<SCHEMA>.policy_docs_index
+  Genie Space ID:         01ef...abcd
+
+Add these to your advanced/.env file:
+  VECTOR_SEARCH_INDEX=<CATALOG>.<SCHEMA>.policy_docs_index
+  GENIE_SPACE_ID=01ef...abcd
+```
+
+**Save these values** — you'll need them in your workshop level's configuration step.
+
+### Done!
+
+You now have everything ready. Go to your workshop level:
+
+| Level | Next step |
+|-------|-----------|
+| Simple (L100) | [`simple/LAB_GUIDE.md`](../simple/LAB_GUIDE.md) |
+| Medium (L200) — Local | [`medium/WORKSHOP_INSTRUCTIONS.md`](../medium/WORKSHOP_INSTRUCTIONS.md) |
+| Medium (L200) — Workspace | [`medium/WORKSHOP_INSTRUCTIONS_WORKSPACE.md`](../medium/WORKSHOP_INSTRUCTIONS_WORKSPACE.md) |
+| Advanced (L300) — Local | [`advanced/WORKSHOP_INSTRUCTIONS.md`](../advanced/WORKSHOP_INSTRUCTIONS.md) |
+| Advanced (L300) — Workspace | [`advanced/WORKSHOP_INSTRUCTIONS_WORKSPACE.md`](../advanced/WORKSHOP_INSTRUCTIONS_WORKSPACE.md) |
+
+---
+
+## Path B: Workspace Notebook
+
+Run everything inside Databricks — no local tools needed.
+
+### Prerequisites
+
+- A Databricks workspace with **Unity Catalog**, **Vector Search**, and **Foundation Model API** enabled
+- A **running SQL warehouse** (Compute > SQL Warehouses)
+- The repository imported as a Git Folder (Workspace > Repos > Add > Git Folder)
+
+### Step 1: Open the notebook
+
+Navigate to `data/workspace_setup_script/01_quickstart_setup.py` in the workspace file browser and open it.
+
+### Step 2: Configure and run
+
+1. At the top, select your **catalog** and **schema** from the dropdown widgets
+2. Click **Run All**
+3. Wait ~10-15 minutes (most time is Vector Search endpoint provisioning)
+
+### Step 3: Copy the output values
+
+When complete, the notebook prints a summary:
+
+```
+======================================================================
+  WORKSHOP SETUP COMPLETE
+======================================================================
+  Catalog/Schema:        my_catalog.retail_agent
+
+  Vector Search Index:   my_catalog.retail_agent.policy_docs_index
+  Genie Space ID:        01ef...abcd
+  MLflow Experiment ID:  1234567890123456
+======================================================================
+```
+
+**Save these values** — you'll need them in your workshop level's configuration step.
+
+### Done!
+
+You now have everything ready. Go to your workshop level:
+
+| Level | Next step |
+|-------|-----------|
+| Simple (L100) | [`simple/LAB_GUIDE.md`](../simple/LAB_GUIDE.md) |
+| Medium (L200) — Workspace | [`medium/WORKSHOP_INSTRUCTIONS_WORKSPACE.md`](../medium/WORKSHOP_INSTRUCTIONS_WORKSPACE.md) |
+| Advanced (L300) — Workspace | [`advanced/WORKSHOP_INSTRUCTIONS_WORKSPACE.md`](../advanced/WORKSHOP_INSTRUCTIONS_WORKSPACE.md) |
+
+---
+
+## What You Now Have
+
+| Resource | Description |
+|----------|-------------|
+| `customers` table | 200 synthetic customers |
+| `products` table | ~500 retail products |
+| `stores` table | 10 store locations |
+| `transactions` table | 2,000 transactions |
+| `transaction_items` table | ~8,000 line items |
+| `payment_history` table | 400 payment records |
+| `policy_docs_chunked` table | Policy documents split into searchable chunks |
+| Vector Search index | Semantic search over policy documents |
+| Genie Space | Natural language querying of retail data |
+| MLflow Experiment | Agent tracing and evaluation |
+
+---
+
+## Troubleshooting
+
+| Issue | Fix |
+|-------|-----|
+| `JSONDecodeError` or auth errors | Auth expired — run `databricks auth login --profile DEFAULT` |
+| `create_resources.py` times out | VS endpoint can take 10+ min — re-run, it's idempotent |
+| Vector Search index shows "Syncing" | Normal — wait 5-10 min after creation for initial sync |
+| Notebook widget doesn't show catalogs | Ensure your cluster has Unity Catalog access |
+| `WAREHOUSE_NOT_FOUND` | Start a SQL warehouse first (Compute > SQL Warehouses) |
+
+---
+
+## Technical Reference
+
+### Folder structure
 
 ```
 data/
-├── README.md
-├── create_structured_data.py     # PySpark script — generates structured tables (run on cluster or locally)
-├── create_chunked_docs.py        # PySpark script — chunks policy docs (requires UC Volumes access)
-├── execute_sql.py                # Local script — generates structured tables via SQL REST API
-├── execute_chunking.py           # Local script — chunks policy docs via SQL REST API
-├── run_sql_generation.py         # Local script — generates structured tables via Databricks CLI
-└── policy_docs/                  # Source markdown policy documents (7 files)
-    ├── customer_service_guidelines.md
-    ├── delivery_pickup_procedures.md
-    ├── membership_loyalty_program.md
-    ├── privacy_policy.md
-    ├── product_safety_recalls.md
-    ├── return_refund_policy.md
-    └── store_operating_procedures.md
+├── README.md                              ← you are here
+├── policy_docs/                           # Source markdown policy documents (7 files)
+│   ├── customer_service_guidelines.md
+│   ├── delivery_pickup_procedures.md
+│   ├── membership_loyalty_program.md
+│   ├── privacy_policy.md
+│   ├── product_safety_recalls.md
+│   ├── return_refund_policy.md
+│   └── store_operating_procedures.md
+├── local_cli_setup_script/                # Scripts that run from your local machine
+│   ├── execute_sql.py                     # Generate structured tables via SQL REST API
+│   ├── execute_chunking.py                # Chunk policy docs via SQL REST API
+│   └── create_resources.py                # Create Vector Search + Genie Space
+└── workspace_setup_script/                # Databricks notebook (does everything on-cluster)
+    └── 01_quickstart_setup.py
 ```
 
-## Scripts Overview
+### Script arguments
 
-There are **two tasks**, each with multiple execution variants:
+All local CLI scripts accept the same arguments:
 
-### Task 1: Generate Structured Retail Data
+| Argument | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `--warehouse-id` | Yes | — | SQL warehouse ID |
+| `--catalog` | Yes | — | Unity Catalog name |
+| `--schema` | Yes | — | Schema name |
+| `--profile` | No | `DEFAULT` | Databricks CLI profile |
 
-Creates 6 tables: `customers` (200 rows), `products` (~500), `stores` (10), `transactions` (2000), `transaction_items` (~8000+), `payment_history` (400).
+`create_resources.py` also accepts:
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--vs-endpoint-name` | auto-generated | Vector Search endpoint name |
+| `--vs-index-name` | `policy_docs_index` | Vector Search index name |
 
-| Script | Runs On | Method |
-|--------|---------|--------|
-| `create_structured_data.py` | Databricks cluster or local with PySpark | PySpark DataFrames |
-| `execute_sql.py` | Local machine | SQL via REST API (`urllib`) |
-| `run_sql_generation.py` | Local machine | SQL via `databricks api` CLI |
+### Notes
 
-### Task 2: Chunk Policy Documents for Vector Search
-
-Reads the 7 markdown files from `policy_docs/`, splits them into overlapping chunks (1000 chars, 200 overlap), and writes to a `policy_docs_chunked` table.
-
-| Script | Runs On | Method |
-|--------|---------|--------|
-| `create_chunked_docs.py` | Databricks cluster or local with PySpark | PySpark + UC Volumes |
-| `execute_chunking.py` | Local machine | SQL via REST API (`urllib`) |
-
-## TODO: What to Change for a New Workspace
-
-### Required Changes (all 5 scripts)
-
-Update these two constants at the top of **every** script:
-
-| Constant | Current Value | Update To |
-|----------|---------------|-----------|
-| `CATALOG` | `"qsic_workshop_prep_catalog"` | Your Unity Catalog name |
-| `SCHEMA` | `"retail_agent"` | Your target schema name |
-
-Files to update:
-- [ ] `create_structured_data.py` — lines with `CATALOG` and `SCHEMA`
-- [ ] `create_chunked_docs.py` — lines with `CATALOG` and `SCHEMA`
-- [ ] `execute_sql.py` — lines with `CATALOG` and `SCHEMA`
-- [ ] `execute_chunking.py` — lines with `CATALOG` and `SCHEMA`
-- [ ] `run_sql_generation.py` — lines with `CATALOG` and `SCHEMA`
-
-### Prerequisites for the New Workspace
-
-- [ ] Create the target catalog and schema in Unity Catalog
-- [ ] For PySpark scripts: run on a Databricks cluster (e.g. via `databricks jobs submit`) or locally with PySpark + UC connectivity
-- [ ] For `create_chunked_docs.py`: create a UC Volume and upload `policy_docs/*.md` files:
-  ```bash
-  databricks fs cp ./policy_docs/ dbfs:/Volumes/<CATALOG>/<SCHEMA>/policy_docs/ --recursive --profile <profile>
-  ```
-- [ ] For local scripts: ensure the `databricks` CLI is installed and configured with a profile
-- [ ] For local scripts: have a SQL warehouse running and note its warehouse ID
-
-### Runtime Arguments (local scripts only)
-
-The local scripts accept CLI arguments — no hardcoded workspace URLs:
-
-```bash
-# Structured data generation
-python execute_sql.py --profile <PROFILE> --warehouse-id <WAREHOUSE_ID>
-python run_sql_generation.py --profile <PROFILE> --warehouse-id <WAREHOUSE_ID>
-
-# Document chunking
-python execute_chunking.py --profile <PROFILE> --warehouse-id <WAREHOUSE_ID>
-```
-
-### Post-Data-Generation: Genie Space Setup
-
-Once the structured retail tables are created, set up a Genie space so business users can query the data using natural language.
-
-- [ ] **Create a Genie space** via the REST API (`POST /api/2.0/genie/spaces`) or the Databricks UI
-  - Title: e.g. `"QSIC Retail Agent"`
-  - Description: describe the retail dataset for Genie's context
-  - Table identifiers: add all 6 structured tables (`customers`, `products`, `stores`, `transactions`, `transaction_items`, `payment_history`)
-  - Warehouse ID: a Pro or Serverless SQL warehouse
-- [ ] **Write a setup script** (`create_genie_space.py`) that automates the above via the REST API
-- [ ] Verify Genie can answer natural language queries against the retail tables
-
-### Post-Chunking: Vector Search Setup
-
-Once the `policy_docs_chunked` table is populated, create a Vector Search endpoint and index for semantic retrieval.
-
-- [ ] **Create a Vector Search endpoint** using the Python SDK:
-  ```python
-  from databricks.vector_search.client import VectorSearchClient
-  client = VectorSearchClient()
-  client.create_endpoint(name="<ENDPOINT_NAME>", endpoint_type="STANDARD")
-  ```
-- [ ] **Wait for the endpoint** to reach `READY` state (can take several minutes)
-- [ ] **Create a Delta Sync index** on the chunked policy table:
-  ```python
-  client.create_delta_sync_index(
-      endpoint_name="<ENDPOINT_NAME>",
-      source_table_name="<CATALOG>.<SCHEMA>.policy_docs_chunked",
-      index_name="<CATALOG>.<SCHEMA>.policy_docs_vs_index",
-      pipeline_type="TRIGGERED",
-      primary_key="chunk_id",
-      embedding_source_column="content",
-      embedding_model_endpoint_name="databricks-gte-large-en",
-  )
-  ```
-- [ ] **Write a setup script** (`create_vector_search.py`) that automates endpoint + index creation
-- [ ] **Sync the index** and verify similarity search returns relevant policy chunks
-
-### Other Considerations
-
-- [ ] Verify the Databricks CLI profile points to the correct workspace host
-- [ ] Ensure the service principal or user has `CREATE TABLE` and `WRITE` permissions on the target schema
-- [ ] If changing the chunking parameters (size/overlap), update both `create_chunked_docs.py` and `execute_chunking.py` to keep them in sync
-- [ ] All scripts use `random.seed(42)` for reproducibility — data will be identical across runs
-- [ ] Ensure the workspace has a Foundation Model API endpoint (e.g. `databricks-gte-large-en`) available for embedding generation
+- All scripts use `random.seed(42)` for reproducibility
+- `create_resources.py` is idempotent — safe to re-run if interrupted
+- Scripts can be run from any directory (paths resolve relative to the script file)

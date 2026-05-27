@@ -3,7 +3,7 @@ Execute SQL statements against Databricks SQL warehouse via REST API.
 Generates synthetic retail grocery data.
 
 Usage:
-    python synthetic_data/execute_sql.py --profile DEFAULT --warehouse-id <id>
+    python execute_sql.py --profile DEFAULT --warehouse-id <id> --catalog <catalog> --schema <schema>
 """
 
 import argparse
@@ -16,30 +16,61 @@ from datetime import datetime, timedelta
 
 random.seed(42)
 
-CATALOG = "ananyaroy"
-SCHEMA = "retail_wiab"
-FULL_SCHEMA = f"{CATALOG}.{SCHEMA}"
+FULL_SCHEMA = ""
 
 
 def get_token(profile: str) -> str:
     result = subprocess.run(
-        ["databricks", "auth", "token", "--profile", profile, "-o", "json"],
+        ["databricks", "auth", "token", "--profile", profile, "--output", "json"],
         capture_output=True, text=True,
     )
-    return json.loads(result.stdout)["access_token"]
+    if result.returncode != 0 or not result.stdout.strip():
+        print(f"ERROR: Failed to get auth token for profile '{profile}'.", file=sys.stderr)
+        if result.stderr:
+            print(f"  {result.stderr.strip()}", file=sys.stderr)
+        print(f"\nFix: Run 'databricks auth login --profile {profile}' to authenticate.", file=sys.stderr)
+        sys.exit(1)
+    try:
+        return json.loads(result.stdout)["access_token"]
+    except (json.JSONDecodeError, KeyError):
+        print(f"ERROR: Unexpected response from 'databricks auth token':", file=sys.stderr)
+        print(f"  {result.stdout[:200]}", file=sys.stderr)
+        print(f"\nFix: Run 'databricks auth login --profile {profile}' to re-authenticate.", file=sys.stderr)
+        sys.exit(1)
 
 
 def get_host(profile: str) -> str:
     result = subprocess.run(
-        ["databricks", "auth", "profiles", "-o", "json"],
+        ["databricks", "auth", "env", "--profile", profile, "--output", "json"],
         capture_output=True, text=True,
     )
-    data = json.loads(result.stdout)
-    profiles = data.get("profiles", data) if isinstance(data, dict) else data
-    for p in profiles:
-        if p.get("name") == profile:
-            return p.get("host", "")
-    return ""
+    if result.returncode == 0 and result.stdout.strip():
+        try:
+            env_data = json.loads(result.stdout)
+            return env_data.get("env", {}).get("DATABRICKS_HOST", "").rstrip("/")
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    # Fallback: try profiles list
+    result = subprocess.run(
+        ["databricks", "auth", "profiles", "--output", "json"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        print(f"ERROR: Could not determine workspace host for profile '{profile}'.", file=sys.stderr)
+        print(f"Fix: Run 'databricks auth login --profile {profile}'.", file=sys.stderr)
+        sys.exit(1)
+    try:
+        data = json.loads(result.stdout)
+        profiles = data.get("profiles", data) if isinstance(data, dict) else data
+        for p in profiles:
+            if p.get("name") == profile:
+                return p.get("host", "").rstrip("/")
+    except (json.JSONDecodeError, KeyError):
+        pass
+    print(f"ERROR: Profile '{profile}' not found. Available profiles:", file=sys.stderr)
+    print(f"  Run 'databricks auth profiles' to see available profiles.", file=sys.stderr)
+    sys.exit(1)
 
 
 def run_sql(statement: str, token: str, host: str, warehouse_id: str) -> dict:
@@ -255,16 +286,24 @@ def batch_insert(table, columns, rows, token, host, wid, batch_size=50):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--profile", default="DEFAULT")
-    parser.add_argument("--warehouse-id", required=True)
+    parser = argparse.ArgumentParser(
+        description="Generate synthetic retail grocery data in Databricks Unity Catalog."
+    )
+    parser.add_argument("--profile", default="DEFAULT", help="Databricks CLI profile name")
+    parser.add_argument("--warehouse-id", required=True, help="SQL warehouse ID")
+    parser.add_argument("--catalog", required=True, help="Unity Catalog name (e.g. my_catalog)")
+    parser.add_argument("--schema", required=True, help="Schema name (e.g. retail_agent)")
     args = parser.parse_args()
+
+    global FULL_SCHEMA
+    FULL_SCHEMA = f"{args.catalog}.{args.schema}"
 
     print("Getting auth token...")
     token = get_token(args.profile)
     host = get_host(args.profile)
     wid = args.warehouse_id
     print(f"Host: {host}")
+    print(f"Target schema: {FULL_SCHEMA}")
 
     # ── 1. Customers ────────────────────────────────────────────
     print("\n=== 1. Creating customers table (200 rows) ===")

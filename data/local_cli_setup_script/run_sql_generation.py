@@ -3,7 +3,7 @@ Generate synthetic retail grocery data via Databricks SQL API.
 Runs locally — sends SQL statements to a Databricks SQL warehouse.
 
 Usage:
-    python synthetic_data/run_sql_generation.py --profile DEFAULT --warehouse-id <id>
+    python run_sql_generation.py --profile DEFAULT --warehouse-id <id> --catalog <catalog> --schema <schema>
 """
 
 import argparse
@@ -16,9 +16,7 @@ from datetime import datetime, timedelta
 
 random.seed(42)
 
-CATALOG = "ananyaroy"
-SCHEMA = "retail_wiab"
-FULL_SCHEMA = f"{CATALOG}.{SCHEMA}"
+FULL_SCHEMA = ""
 
 
 def run_sql(statement: str, profile: str, warehouse_id: str) -> dict:
@@ -218,13 +216,21 @@ def batch_insert(table, columns, rows, profile, warehouse_id, batch_size=50):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--profile", default="DEFAULT")
-    parser.add_argument("--warehouse-id", required=True)
+    parser = argparse.ArgumentParser(
+        description="Generate synthetic retail grocery data via Databricks SQL API."
+    )
+    parser.add_argument("--profile", default="DEFAULT", help="Databricks CLI profile name")
+    parser.add_argument("--warehouse-id", required=True, help="SQL warehouse ID")
+    parser.add_argument("--catalog", required=True, help="Unity Catalog name (e.g. my_catalog)")
+    parser.add_argument("--schema", required=True, help="Schema name (e.g. retail_agent)")
     args = parser.parse_args()
+
+    global FULL_SCHEMA
+    FULL_SCHEMA = f"{args.catalog}.{args.schema}"
 
     profile = args.profile
     wid = args.warehouse_id
+    print(f"Target schema: {FULL_SCHEMA}")
 
     # ── 1. Customers ────────────────────────────────────────────
     print("\n=== Creating customers table ===")
